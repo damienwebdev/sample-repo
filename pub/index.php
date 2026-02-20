@@ -24,8 +24,6 @@ HTML;
     exit(1);
 }
 
-var_dump("error");die;
-
 $bootstrap = Bootstrap::create(BP, $_SERVER);
 /** @var \Magento\Framework\App\Http $app */
 $app = $bootstrap->createApplication(\Magento\Framework\App\Http::class);
