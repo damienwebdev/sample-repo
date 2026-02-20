@@ -20,7 +20,7 @@ jobs:
       - name: React to comment with eyes
         if: github.event_name == 'issue_comment'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GRAYBOT_GITHUB_TOKEN }}
         run: gh api repos/${{ github.repository }}/issues/comments/${{ github.event.comment.id }}/reactions -f content=eyes
 
       - name: Checkout repository
@@ -60,7 +60,7 @@ jobs:
         with:
           env: |
             CLAUDE_CODE_OAUTH_TOKEN
-            GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }}
+            GITHUB_TOKEN=${{ secrets.GRAYBOT_GITHUB_TOKEN }}
           push: never
           runCmd: |
             echo "=== Env check ===" && echo "CLAUDE_CODE_OAUTH_TOKEN is ${CLAUDE_CODE_OAUTH_TOKEN:+set}${CLAUDE_CODE_OAUTH_TOKEN:-unset}" && echo "GITHUB_TOKEN is ${GITHUB_TOKEN:+set}${GITHUB_TOKEN:-unset}"
