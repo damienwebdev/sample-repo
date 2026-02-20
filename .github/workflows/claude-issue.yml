@@ -36,6 +36,7 @@ jobs:
         run: |
           BRANCH="claude/issue-${ISSUE_NUMBER}"
           if git ls-remote --exit-code origin "$BRANCH" &>/dev/null; then
+            git fetch origin "$BRANCH"
             git checkout "$BRANCH"
             echo "existed=true" >> "$GITHUB_OUTPUT"
           else
