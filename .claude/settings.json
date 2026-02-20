@@ -1,8 +1,9 @@
 {
   "permissions": {
     "allow": [
-      "Bash(git:*)",
-      "Bash(gh:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
       "Bash(php -v:*)",
       "Bash(composer --version:*)",
       "Bash(composer install:*)",

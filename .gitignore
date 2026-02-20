@@ -76,3 +76,6 @@ atlassian*
 
 ## Claude
 .claude-prompt.txt
+.claude-commit-message.txt
+.claude-pr-title.txt
+.claude-pr-body.txt

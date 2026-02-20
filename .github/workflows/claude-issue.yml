@@ -45,11 +45,15 @@ jobs:
 
           Instructions:
           1. Analyze the issue and understand what changes are needed.
-          2. Create a new branch named 'claude/issue-${ISSUE_NUMBER}'.
-          3. Implement the changes described in the issue.
-          4. Commit the changes with a descriptive message referencing the issue.
-          5. Push the branch and open a pull request that closes #${ISSUE_NUMBER}.
-          Use 'gh' CLI for GitHub operations. The repo is already checked out.
+          2. Make the necessary code changes to fix the issue.
+          3. Write the following files:
+             - .claude-commit-message.txt — a conventional commit message (e.g. fix: ..., feat: ...) referencing #${ISSUE_NUMBER}
+             - .claude-pr-title.txt — a short PR title (under 70 chars)
+             - .claude-pr-body.txt — a markdown PR body with exactly three sections:
+               ## Debugging Steps — the exact steps you took to find the issue (only the steps that led to the answer, not dead ends)
+               ## Root Cause — what was wrong and why
+               ## Change Summary — what you changed to fix it
+          You may use git for reading (status, diff, log) but do NOT run git commit, git push, or gh CLI.
           EOF
 
       - name: Run Claude in devcontainer
@@ -60,9 +64,36 @@ jobs:
         with:
           env: |
             CLAUDE_CODE_OAUTH_TOKEN
-            GITHUB_TOKEN=${{ secrets.GRAYBOT_GITHUB_TOKEN }}
           push: never
           runCmd: |
-            echo "=== Env check ===" && echo "CLAUDE_CODE_OAUTH_TOKEN is ${CLAUDE_CODE_OAUTH_TOKEN:+set}${CLAUDE_CODE_OAUTH_TOKEN:-unset}" && echo "GITHUB_TOKEN is ${GITHUB_TOKEN:+set}${GITHUB_TOKEN:-unset}"
-            echo "=== Smoke test ===" && echo "What is 1+1?" | claude --print --verbose
             echo "=== Running prompt ===" && cat .claude-prompt.txt | claude --print --verbose
+
+      - name: Commit, push, and create PR
+        env:
+          GH_TOKEN: ${{ secrets.GRAYBOT_GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          if git diff --quiet; then
+            echo "No changes made by Claude"
+            exit 0
+          fi
+
+          BRANCH="claude/issue-${ISSUE_NUMBER}"
+          git checkout -b "$BRANCH"
+          git add -A
+          git add -f .claude-commit-message.txt .claude-pr-title.txt .claude-pr-body.txt
+
+          COMMIT_MSG=$(cat .claude-commit-message.txt 2>/dev/null || echo "fix: resolve issue #${ISSUE_NUMBER}")
+          PR_TITLE=$(cat .claude-pr-title.txt 2>/dev/null || echo "Fix #${ISSUE_NUMBER}: ${{ github.event.issue.title }}")
+          PR_BODY=$(cat .claude-pr-body.txt 2>/dev/null || echo "Automated fix for #${ISSUE_NUMBER}.")
+
+          git reset -- .claude-commit-message.txt .claude-pr-title.txt .claude-pr-body.txt
+          git -c user.name="gray-bot" -c user.email="gray-bot@users.noreply.github.com" \
+            commit -m "$COMMIT_MSG"
+          git push origin "$BRANCH"
+
+          gh pr create \
+            --title "$PR_TITLE" \
+            --body "$PR_BODY" \
+            --head "$BRANCH" \
+            --base main
