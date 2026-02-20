@@ -43,6 +43,11 @@ runs:
         echo "$DATA" | jq -r '.body' >> "$GITHUB_OUTPUT"
         echo "EOF" >> "$GITHUB_OUTPUT"
 
+    - name: Save starting ref
+      id: start
+      shell: bash
+      run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
     - name: Checkout existing branch if present
       id: branch
       shell: bash
@@ -171,3 +176,8 @@ runs:
             --head "$BRANCH" \
             --base "$BASE_BRANCH"
         fi
+
+    - name: Restore starting ref
+      if: always()
+      shell: bash
+      run: git checkout ${{ steps.start.outputs.sha }}
