@@ -1,0 +1,173 @@
+name: Claude Issue Solver
+description: Checks out or creates the issue branch, runs Claude in the devcontainer, then commits and opens/updates a PR.
+
+inputs:
+  issue_number:
+    description: GitHub issue number
+    required: true
+  base_branch:
+    description: Branch to target for the PR
+    required: false
+    default: main
+  claude_token:
+    description: Claude Code OAuth token
+    required: true
+  github_token:
+    description: GitHub token with contents, pull-requests, and issues write permissions
+    required: true
+  devcontainer:
+    description: Path to the devcontainer.json config file
+    required: false
+    default: .devcontainer/devcontainer.json
+
+runs:
+  using: composite
+  steps:
+    - name: React to comment with eyes
+      if: github.event_name == 'issue_comment' || github.event_name == 'pull_request_review_comment'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github_token }}
+      run: gh api repos/${{ github.repository }}/issues/comments/${{ github.event.comment.id }}/reactions -f content=eyes
+
+    - name: Fetch issue data
+      id: issue
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github_token }}
+        ISSUE_NUMBER: ${{ inputs.issue_number }}
+      run: |
+        DATA=$(gh issue view "$ISSUE_NUMBER" --json title,body)
+        echo "title=$(echo "$DATA" | jq -r '.title')" >> "$GITHUB_OUTPUT"
+        echo "body<<EOF" >> "$GITHUB_OUTPUT"
+        echo "$DATA" | jq -r '.body' >> "$GITHUB_OUTPUT"
+        echo "EOF" >> "$GITHUB_OUTPUT"
+
+    - name: Checkout existing branch if present
+      id: branch
+      shell: bash
+      env:
+        ISSUE_NUMBER: ${{ inputs.issue_number }}
+        PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+      run: |
+        if [ -n "$PR_HEAD_REF" ]; then
+          # PR comment — check out the PR's existing head branch directly
+          BRANCH="$PR_HEAD_REF"
+          git fetch origin "$BRANCH"
+          git checkout "$BRANCH"
+          echo "existed=true" >> "$GITHUB_OUTPUT"
+        else
+          BRANCH="claude/issue-${ISSUE_NUMBER}"
+          if git ls-remote --exit-code origin "$BRANCH" &>/dev/null; then
+            git fetch origin "$BRANCH"
+            git checkout "$BRANCH"
+            echo "existed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "existed=false" >> "$GITHUB_OUTPUT"
+          fi
+        fi
+        echo "name=${BRANCH}" >> "$GITHUB_OUTPUT"
+
+    - name: Write prompt file
+      shell: bash
+      env:
+        ISSUE_NUMBER: ${{ inputs.issue_number }}
+        ISSUE_TITLE: ${{ steps.issue.outputs.title }}
+        ISSUE_BODY: ${{ steps.issue.outputs.body }}
+        COMMENT_BODY: ${{ github.event.comment.body }}
+        BASE_BRANCH: ${{ inputs.base_branch }}
+        IS_RETRY: ${{ steps.branch.outputs.existed }}
+      run: |
+        RETRY_MSG=""
+        if [ "$IS_RETRY" = "true" ]; then
+          RETRY_MSG="This is a RETRY. A prior attempt exists on this branch. Review the previous changes with git log and git diff ${BASE_BRANCH} to understand what was already tried, then iterate and improve on it."
+        else
+          RETRY_MSG="This is a fresh attempt."
+        fi
+
+        REQUEST_MSG=""
+        if [ -n "$COMMENT_BODY" ]; then
+          REQUEST_MSG="A user has made the following request in a comment:
+
+        ${COMMENT_BODY}"
+        fi
+
+        cat <<EOF > .claude-prompt.txt
+        You are working in a Magento 2 project. A GitHub issue has been filed.
+
+        Issue #${ISSUE_NUMBER}: ${ISSUE_TITLE}
+
+        ${ISSUE_BODY}
+
+        ${REQUEST_MSG}
+
+        ${RETRY_MSG}
+
+        Instructions:
+        1. Analyze the issue and understand what changes are needed.
+        2. Make the necessary code changes to fix the issue.
+        3. Write the following files:
+           - .claude-commit-message.txt — a conventional commit message (e.g. fix: ..., feat: ...) referencing #${ISSUE_NUMBER}
+           - .claude-pr-title.txt — a short PR title (under 70 chars)
+           - .claude-pr-body.txt — a markdown PR body with exactly three sections:
+             ## Debugging Steps — the exact steps you took to find the issue (only the steps that led to the answer, not dead ends)
+             ## Root Cause — what was wrong and why
+             ## Change Summary — what you changed to fix it
+        You may use git for reading (status, diff, log) but do NOT run git commit, git push, or gh CLI.
+        EOF
+
+    - name: Run Claude in devcontainer
+      uses: devcontainers/ci@v0.3
+      env:
+        CLAUDE_CODE_OAUTH_TOKEN: ${{ inputs.claude_token }}
+      with:
+        configFile: ${{ inputs.devcontainer }}
+        env: |
+          CLAUDE_CODE_OAUTH_TOKEN
+        push: never
+        runCmd: |
+          echo "=== Running prompt ===" && cat .claude-prompt.txt | claude --print --verbose
+
+    - name: Commit, push, and create PR
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github_token }}
+        ISSUE_NUMBER: ${{ inputs.issue_number }}
+        ISSUE_TITLE: ${{ steps.issue.outputs.title }}
+        BASE_BRANCH: ${{ inputs.base_branch }}
+      run: |
+        BRANCH="${{ steps.branch.outputs.name }}"
+
+        # Create branch if not already on it
+        git checkout "$BRANCH" 2>/dev/null || git checkout -b "$BRANCH"
+
+        git add -A
+        git add -f .claude-commit-message.txt .claude-pr-title.txt .claude-pr-body.txt
+
+        COMMIT_MSG=$(cat .claude-commit-message.txt 2>/dev/null || echo "fix: resolve issue #${ISSUE_NUMBER}")
+        PR_TITLE=$(cat .claude-pr-title.txt 2>/dev/null || echo "Fix #${ISSUE_NUMBER}: ${ISSUE_TITLE}")
+        PR_BODY=$(cat .claude-pr-body.txt 2>/dev/null || echo "Automated fix for #${ISSUE_NUMBER}.")
+
+        git reset -- .claude-commit-message.txt .claude-pr-title.txt .claude-pr-body.txt
+
+        # Check if there are changes vs base branch
+        if git diff --quiet "$BASE_BRANCH"; then
+          echo "No changes relative to $BASE_BRANCH"
+          exit 0
+        fi
+
+        git -c user.name="gray-bot" -c user.email="gray-bot@users.noreply.github.com" \
+          commit --allow-empty -m "$COMMIT_MSG"
+        git push --force-with-lease origin "$BRANCH"
+
+        # Update existing open PR, or create a new one (including if prior PR was closed)
+        OPEN_PR=$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number')
+        if [ -n "$OPEN_PR" ]; then
+          gh pr edit "$OPEN_PR" --title "$PR_TITLE" --body "$PR_BODY"
+        else
+          gh pr create \
+            --title "$PR_TITLE" \
+            --body "$PR_BODY" \
+            --head "$BRANCH" \
+            --base "$BASE_BRANCH"
+        fi

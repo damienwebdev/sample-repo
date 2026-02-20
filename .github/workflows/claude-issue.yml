@@ -5,133 +5,31 @@ on:
     types: [labeled]
   issue_comment:
     types: [created]
+  pull_request_review_comment:
+    types: [created]
 
 jobs:
   claude:
     if: |
       (github.event_name == 'issues' && github.event.label.name == 'claude') ||
-      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '/claude'))
+      (github.event_name == 'issue_comment' && (contains(github.event.comment.body, '/claude') || contains(github.event.comment.body, '@claude'))) ||
+      (github.event_name == 'pull_request_review_comment' && (contains(github.event.comment.body, '/claude') || contains(github.event.comment.body, '@claude')))
     runs-on: ubuntu-latest
-    env:
-      BASE_BRANCH: main
+    timeout-minutes: 15
     permissions:
       contents: write
       pull-requests: write
       issues: write
     steps:
-      - name: React to comment with eyes
-        if: github.event_name == 'issue_comment'
-        env:
-          GH_TOKEN: ${{ secrets.GRAYBOT_GITHUB_TOKEN }}
-        run: gh api repos/${{ github.repository }}/issues/comments/${{ github.event.comment.id }}/reactions -f content=eyes
-
       - name: Checkout repository
         uses: actions/checkout@v6
         with:
           submodules: recursive
           fetch-depth: 50
 
-      - name: Checkout existing branch if present
-        id: branch
-        env:
-          ISSUE_NUMBER: ${{ github.event.issue.number }}
-        run: |
-          BRANCH="claude/issue-${ISSUE_NUMBER}"
-          if git ls-remote --exit-code origin "$BRANCH" &>/dev/null; then
-            git fetch origin "$BRANCH"
-            git checkout "$BRANCH"
-            echo "existed=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "existed=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Write prompt file
-        shell: bash
-        env:
-          ISSUE_NUMBER: ${{ github.event.issue.number }}
-          ISSUE_TITLE: ${{ github.event.issue.title }}
-          ISSUE_BODY: ${{ github.event.issue.body }}
-          IS_RETRY: ${{ steps.branch.outputs.existed }}
-        run: |
-          RETRY_MSG=""
-          if [ "$IS_RETRY" = "true" ]; then
-            RETRY_MSG="This is a RETRY. A prior attempt exists on this branch. Review the previous changes with git log and git diff ${BASE_BRANCH} to understand what was already tried, then iterate and improve on it."
-          else
-            RETRY_MSG="This is a fresh attempt."
-          fi
-
-          cat <<EOF > .claude-prompt.txt
-          You are working in a Magento 2 project. A GitHub issue has been filed.
-
-          Issue #${ISSUE_NUMBER}: ${ISSUE_TITLE}
-
-          ${ISSUE_BODY}
-
-          ${RETRY_MSG}
-
-          Instructions:
-          1. Analyze the issue and understand what changes are needed.
-          2. Make the necessary code changes to fix the issue.
-          3. Write the following files:
-             - .claude-commit-message.txt — a conventional commit message (e.g. fix: ..., feat: ...) referencing #${ISSUE_NUMBER}
-             - .claude-pr-title.txt — a short PR title (under 70 chars)
-             - .claude-pr-body.txt — a markdown PR body with exactly three sections:
-               ## Debugging Steps — the exact steps you took to find the issue (only the steps that led to the answer, not dead ends)
-               ## Root Cause — what was wrong and why
-               ## Change Summary — what you changed to fix it
-          You may use git for reading (status, diff, log) but do NOT run git commit, git push, or gh CLI.
-          EOF
-
-      - name: Run Claude in devcontainer
-        timeout-minutes: 8
-        uses: devcontainers/ci@v0.3
-        env:
-          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+      - name: Run Claude on issue
+        uses: ./.github/actions/claude-issue
         with:
-          env: |
-            CLAUDE_CODE_OAUTH_TOKEN
-          push: never
-          runCmd: |
-            echo "=== Running prompt ===" && cat .claude-prompt.txt | claude --print --verbose
-
-      - name: Commit, push, and create PR
-        env:
-          GH_TOKEN: ${{ secrets.GRAYBOT_GITHUB_TOKEN }}
-          ISSUE_NUMBER: ${{ github.event.issue.number }}
-        run: |
-          BRANCH="claude/issue-${ISSUE_NUMBER}"
-
-          # Create branch if not already on it
-          git checkout "$BRANCH" 2>/dev/null || git checkout -b "$BRANCH"
-
-          git add -A
-          git add -f .claude-commit-message.txt .claude-pr-title.txt .claude-pr-body.txt
-
-          COMMIT_MSG=$(cat .claude-commit-message.txt 2>/dev/null || echo "fix: resolve issue #${ISSUE_NUMBER}")
-          PR_TITLE=$(cat .claude-pr-title.txt 2>/dev/null || echo "Fix #${ISSUE_NUMBER}: ${{ github.event.issue.title }}")
-          PR_BODY=$(cat .claude-pr-body.txt 2>/dev/null || echo "Automated fix for #${ISSUE_NUMBER}.")
-
-          git reset -- .claude-commit-message.txt .claude-pr-title.txt .claude-pr-body.txt
-
-          # Check if there are changes vs main
-          if git diff --quiet "$BASE_BRANCH"; then
-            echo "No changes relative to $BASE_BRANCH"
-            exit 0
-          fi
-
-          # Only commit if there are new staged changes
-          git -c user.name="gray-bot" -c user.email="gray-bot@users.noreply.github.com" \
-            commit --allow-empty -m "$COMMIT_MSG"
-          git push --force-with-lease origin "$BRANCH"
-
-          # Update existing open PR, or create a new one (including if prior PR was closed)
-          OPEN_PR=$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number')
-          if [ -n "$OPEN_PR" ]; then
-            gh pr edit "$OPEN_PR" --title "$PR_TITLE" --body "$PR_BODY"
-          else
-            gh pr create \
-              --title "$PR_TITLE" \
-              --body "$PR_BODY" \
-              --head "$BRANCH" \
-              --base "$BASE_BRANCH"
-          fi
+          issue_number: ${{ github.event.issue.number || github.event.pull_request.number }}
+          claude_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.GRAYBOT_GITHUB_TOKEN }}
