@@ -27,7 +27,20 @@ jobs:
         uses: actions/checkout@v6
         with:
           submodules: recursive
-          fetch-depth: 1
+          fetch-depth: 50
+
+      - name: Checkout existing branch if present
+        id: branch
+        env:
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          BRANCH="claude/issue-${ISSUE_NUMBER}"
+          if git ls-remote --exit-code origin "$BRANCH" &>/dev/null; then
+            git checkout "$BRANCH"
+            echo "existed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "existed=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Write prompt file
         shell: bash
@@ -42,6 +55,8 @@ jobs:
           Issue #${ISSUE_NUMBER}: ${ISSUE_TITLE}
 
           ${ISSUE_BODY}
+
+          This is a ${{ steps.branch.outputs.existed == 'true' && 'RETRY. A prior attempt exists on this branch. Review the previous changes with git log and git diff main to understand what was already tried, then iterate and improve on it.' || 'fresh attempt.' }}
 
           Instructions:
           1. Analyze the issue and understand what changes are needed.
@@ -79,7 +94,10 @@ jobs:
           fi
 
           BRANCH="claude/issue-${ISSUE_NUMBER}"
-          git checkout -b "$BRANCH"
+
+          # Create branch if not already on it
+          git checkout "$BRANCH" 2>/dev/null || git checkout -b "$BRANCH"
+
           git add -A
           git add -f .claude-commit-message.txt .claude-pr-title.txt .claude-pr-body.txt
 
@@ -90,10 +108,16 @@ jobs:
           git reset -- .claude-commit-message.txt .claude-pr-title.txt .claude-pr-body.txt
           git -c user.name="gray-bot" -c user.email="gray-bot@users.noreply.github.com" \
             commit -m "$COMMIT_MSG"
-          git push origin "$BRANCH"
+          git push --force-with-lease origin "$BRANCH"
 
-          gh pr create \
-            --title "$PR_TITLE" \
-            --body "$PR_BODY" \
-            --head "$BRANCH" \
-            --base main
+          # Update existing open PR, or create a new one (including if prior PR was closed)
+          OPEN_PR=$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number')
+          if [ -n "$OPEN_PR" ]; then
+            gh pr edit "$OPEN_PR" --title "$PR_TITLE" --body "$PR_BODY"
+          else
+            gh pr create \
+              --title "$PR_TITLE" \
+              --body "$PR_BODY" \
+              --head "$BRANCH" \
+              --base main
+          fi
