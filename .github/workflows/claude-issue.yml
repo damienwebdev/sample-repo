@@ -1,0 +1,48 @@
+name: Claude PR from Issue
+
+on:
+  issues:
+    types: [opened, labeled]
+
+jobs:
+  claude:
+    if: |
+      github.event.action == 'opened' ||
+      (github.event.action == 'labeled' && github.event.label.name == 'claude')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Run Claude in devcontainer
+        uses: devcontainers/ci@v0.3
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        with:
+          env: |
+            ANTHROPIC_API_KEY
+            GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }}
+          push: never
+          runCmd: |
+            claude --print \
+              --allowedTools "Bash(git:*) Bash(gh:*) Edit Read Glob Grep Write" \
+              "You are working in a Magento 2 project. A GitHub issue has been filed.
+
+            Issue #${{ github.event.issue.number }}: ${{ github.event.issue.title }}
+
+            ${{ github.event.issue.body }}
+
+            Instructions:
+            1. Analyze the issue and understand what changes are needed.
+            2. Create a new branch named 'claude/issue-${{ github.event.issue.number }}'.
+            3. Implement the changes described in the issue.
+            4. Commit the changes with a descriptive message referencing the issue.
+            5. Push the branch and open a pull request that closes #${{ github.event.issue.number }}.
+            Use 'gh' CLI for GitHub operations. The repo is already checked out."
