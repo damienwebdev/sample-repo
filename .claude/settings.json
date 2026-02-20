@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git:*)",
+      "Bash(gh:*)",
+      "Bash(php -v:*)",
+      "Bash(composer --version:*)",
+      "Bash(composer install:*)",
+      "Bash(bin/magento:*)",
+      "Edit",
+      "Read",
+      "Glob",
+      "Grep",
+      "Write"
+    ]
+  }
+}

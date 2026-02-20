@@ -21,6 +21,29 @@ jobs:
           submodules: recursive
           fetch-depth: 1
 
+      - name: Write prompt file
+        shell: bash
+        env:
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+        run: |
+          cat <<EOF > /tmp/claude-prompt.txt
+          You are working in a Magento 2 project. A GitHub issue has been filed.
+
+          Issue #${ISSUE_NUMBER}: ${ISSUE_TITLE}
+
+          ${ISSUE_BODY}
+
+          Instructions:
+          1. Analyze the issue and understand what changes are needed.
+          2. Create a new branch named 'claude/issue-${ISSUE_NUMBER}'.
+          3. Implement the changes described in the issue.
+          4. Commit the changes with a descriptive message referencing the issue.
+          5. Push the branch and open a pull request that closes #${ISSUE_NUMBER}.
+          Use 'gh' CLI for GitHub operations. The repo is already checked out.
+          EOF
+
       - name: Run Claude in devcontainer
         uses: devcontainers/ci@v0.3
         env:
@@ -30,19 +53,4 @@ jobs:
             ANTHROPIC_API_KEY
             GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }}
           push: never
-          runCmd: |
-            claude --print \
-              --allowedTools "Bash(git:*) Bash(gh:*) Edit Read Glob Grep Write" \
-              "You are working in a Magento 2 project. A GitHub issue has been filed.
-
-            Issue #${{ github.event.issue.number }}: ${{ github.event.issue.title }}
-
-            ${{ github.event.issue.body }}
-
-            Instructions:
-            1. Analyze the issue and understand what changes are needed.
-            2. Create a new branch named 'claude/issue-${{ github.event.issue.number }}'.
-            3. Implement the changes described in the issue.
-            4. Commit the changes with a descriptive message referencing the issue.
-            5. Push the branch and open a pull request that closes #${{ github.event.issue.number }}.
-            Use 'gh' CLI for GitHub operations. The repo is already checked out."
+          runCmd: claude --print --verbose "$(cat /tmp/claude-prompt.txt)"
