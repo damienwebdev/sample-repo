@@ -72,3 +72,7 @@ atlassian*
 /generated/*
 !/generated/.htaccess
 .DS_Store
+
+
+## Claude
+.claude-prompt.txt
