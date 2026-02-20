@@ -53,7 +53,7 @@ jobs:
           EOF
 
       - name: Run Claude in devcontainer
-        timeout-minutes: 3
+        timeout-minutes: 8
         uses: devcontainers/ci@v0.3
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
