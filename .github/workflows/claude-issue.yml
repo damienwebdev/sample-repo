@@ -61,4 +61,6 @@ jobs:
             ANTHROPIC_API_KEY
             GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }}
           push: never
-          runCmd: claude --print --verbose "$(cat /tmp/claude-prompt.txt)"
+          runCmd: |
+            echo "=== Smoke test ===" && echo "What is 1+1?" | claude --print --verbose
+            echo "=== Running prompt ===" && claude --print --verbose "$(cat .claude-prompt.txt)"
