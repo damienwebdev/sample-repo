@@ -140,6 +140,8 @@ runs:
         ISSUE_NUMBER: ${{ inputs.issue_number }}
         ISSUE_TITLE: ${{ steps.issue.outputs.title }}
         BASE_BRANCH: ${{ inputs.base_branch }}
+        PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
       run: |
         BRANCH="${{ steps.branch.outputs.name }}"
 
@@ -155,26 +157,34 @@ runs:
 
         git reset -- .claude-commit-message.txt .claude-pr-title.txt .claude-pr-body.txt
 
-        # Check if there are changes vs base branch
+        # Commit and push only if there are changes vs base branch
         if git diff --quiet "$BASE_BRANCH"; then
           echo "No changes relative to $BASE_BRANCH"
-          exit 0
+        else
+          git -c user.name="gray-bot" -c user.email="gray-bot@users.noreply.github.com" \
+            commit -m "$COMMIT_MSG"
+          git push --force-with-lease origin "$BRANCH"
         fi
 
-        git -c user.name="gray-bot" -c user.email="gray-bot@users.noreply.github.com" \
-          commit --allow-empty -m "$COMMIT_MSG"
-        git push --force-with-lease origin "$BRANCH"
-
-        # Update existing open PR, or create a new one (including if prior PR was closed)
-        OPEN_PR=$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number')
-        if [ -n "$OPEN_PR" ]; then
-          gh pr edit "$OPEN_PR" --title "$PR_TITLE" --body "$PR_BODY"
+        if [ -n "$PR_HEAD_REF" ]; then
+          # Comment on existing PR triggered by pull_request_review_comment
+          gh pr comment "$PR_NUMBER" --body "$PR_BODY"
         else
-          gh pr create \
-            --title "$PR_TITLE" \
-            --body "$PR_BODY" \
-            --head "$BRANCH" \
-            --base "$BASE_BRANCH"
+          # Update existing open PR, or create a new one
+          OPEN_PR=$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number')
+          if [ -n "$OPEN_PR" ]; then
+            gh pr edit "$OPEN_PR" --title "$PR_TITLE" --body "$PR_BODY"
+            PR_URL=$(gh pr view "$OPEN_PR" --json url --jq '.url')
+          else
+            PR_URL=$(gh pr create \
+              --title "$PR_TITLE" \
+              --body "$PR_BODY" \
+              --head "$BRANCH" \
+              --base "$BASE_BRANCH" | tail -1)
+          fi
+
+          # Comment on the issue linking to the PR
+          gh issue comment "$ISSUE_NUMBER" --body "A PR has been created/updated for this issue: $PR_URL"
         fi
 
     - name: Restore starting ref
