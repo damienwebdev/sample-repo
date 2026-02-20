@@ -51,7 +51,15 @@ jobs:
           ISSUE_NUMBER: ${{ github.event.issue.number }}
           ISSUE_TITLE: ${{ github.event.issue.title }}
           ISSUE_BODY: ${{ github.event.issue.body }}
+          IS_RETRY: ${{ steps.branch.outputs.existed }}
         run: |
+          RETRY_MSG=""
+          if [ "$IS_RETRY" = "true" ]; then
+            RETRY_MSG="This is a RETRY. A prior attempt exists on this branch. Review the previous changes with git log and git diff ${BASE_BRANCH} to understand what was already tried, then iterate and improve on it."
+          else
+            RETRY_MSG="This is a fresh attempt."
+          fi
+
           cat <<EOF > .claude-prompt.txt
           You are working in a Magento 2 project. A GitHub issue has been filed.
 
@@ -59,7 +67,7 @@ jobs:
 
           ${ISSUE_BODY}
 
-          This is a ${{ steps.branch.outputs.existed == 'true' && 'RETRY. A prior attempt exists on this branch. Review the previous changes with git log and git diff ${{ env.BASE_BRANCH }} to understand what was already tried, then iterate and improve on it.' || 'fresh attempt.' }}
+          ${RETRY_MSG}
 
           Instructions:
           1. Analyze the issue and understand what changes are needed.
