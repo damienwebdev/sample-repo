@@ -2,13 +2,15 @@ name: Claude PR from Issue
 
 on:
   issues:
-    types: [opened, labeled]
+    types: [labeled]
+  issue_comment:
+    types: [created]
 
 jobs:
   claude:
     if: |
-      github.event.action == 'opened' ||
-      (github.event.action == 'labeled' && github.event.label.name == 'claude')
+      (github.event_name == 'issues' && github.event.label.name == 'claude') ||
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '/claude'))
     runs-on: ubuntu-latest
     permissions:
       contents: write
