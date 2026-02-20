@@ -12,6 +12,8 @@ jobs:
       (github.event_name == 'issues' && github.event.label.name == 'claude') ||
       (github.event_name == 'issue_comment' && contains(github.event.comment.body, '/claude'))
     runs-on: ubuntu-latest
+    env:
+      BASE_BRANCH: main
     permissions:
       contents: write
       pull-requests: write
@@ -57,7 +59,7 @@ jobs:
 
           ${ISSUE_BODY}
 
-          This is a ${{ steps.branch.outputs.existed == 'true' && 'RETRY. A prior attempt exists on this branch. Review the previous changes with git log and git diff main to understand what was already tried, then iterate and improve on it.' || 'fresh attempt.' }}
+          This is a ${{ steps.branch.outputs.existed == 'true' && 'RETRY. A prior attempt exists on this branch. Review the previous changes with git log and git diff ${{ env.BASE_BRANCH }} to understand what was already tried, then iterate and improve on it.' || 'fresh attempt.' }}
 
           Instructions:
           1. Analyze the issue and understand what changes are needed.
@@ -89,11 +91,6 @@ jobs:
           GH_TOKEN: ${{ secrets.GRAYBOT_GITHUB_TOKEN }}
           ISSUE_NUMBER: ${{ github.event.issue.number }}
         run: |
-          if git diff --quiet; then
-            echo "No changes made by Claude"
-            exit 0
-          fi
-
           BRANCH="claude/issue-${ISSUE_NUMBER}"
 
           # Create branch if not already on it
@@ -107,8 +104,16 @@ jobs:
           PR_BODY=$(cat .claude-pr-body.txt 2>/dev/null || echo "Automated fix for #${ISSUE_NUMBER}.")
 
           git reset -- .claude-commit-message.txt .claude-pr-title.txt .claude-pr-body.txt
+
+          # Check if there are changes vs main
+          if git diff --quiet "$BASE_BRANCH"; then
+            echo "No changes relative to $BASE_BRANCH"
+            exit 0
+          fi
+
+          # Only commit if there are new staged changes
           git -c user.name="gray-bot" -c user.email="gray-bot@users.noreply.github.com" \
-            commit -m "$COMMIT_MSG"
+            commit --allow-empty -m "$COMMIT_MSG"
           git push --force-with-lease origin "$BRANCH"
 
           # Update existing open PR, or create a new one (including if prior PR was closed)
@@ -120,5 +125,5 @@ jobs:
               --title "$PR_TITLE" \
               --body "$PR_BODY" \
               --head "$BRANCH" \
-              --base main
+              --base "$BASE_BRANCH"
           fi
