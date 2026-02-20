@@ -53,6 +53,7 @@ jobs:
           EOF
 
       - name: Run Claude in devcontainer
+        timeout-minutes: 1
         uses: devcontainers/ci@v0.3
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
