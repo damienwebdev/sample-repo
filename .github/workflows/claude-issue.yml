@@ -56,13 +56,13 @@ jobs:
         timeout-minutes: 3
         uses: devcontainers/ci@v0.3
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
         with:
           env: |
-            ANTHROPIC_API_KEY
+            CLAUDE_CODE_OAUTH_TOKEN
             GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }}
           push: never
           runCmd: |
-            echo "=== Env check ===" && echo "ANTHROPIC_API_KEY is ${ANTHROPIC_API_KEY:+set}${ANTHROPIC_API_KEY:-unset}" && echo "GITHUB_TOKEN is ${GITHUB_TOKEN:+set}${GITHUB_TOKEN:-unset}"
+            echo "=== Env check ===" && echo "CLAUDE_CODE_OAUTH_TOKEN is ${CLAUDE_CODE_OAUTH_TOKEN:+set}${CLAUDE_CODE_OAUTH_TOKEN:-unset}" && echo "GITHUB_TOKEN is ${GITHUB_TOKEN:+set}${GITHUB_TOKEN:-unset}"
             echo "=== Smoke test ===" && echo "What is 1+1?" | claude --print --verbose
             echo "=== Running prompt ===" && cat .claude-prompt.txt | claude --print --verbose
